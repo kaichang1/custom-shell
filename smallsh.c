@@ -6,8 +6,9 @@
 #include <unistd.h>
 #include <string.h>
 
-#define MAXLENGTH 2048
-#define MAXARGS 512
+#define MAXLENGTH 2048  // Max length of user input
+#define MAXARGS 512  // Max number of command arguments
+#define MAXBGPROCS 100  // Max number of background processes
 
 /**
  * Store the different elements of a command
@@ -18,7 +19,7 @@ struct command_line {
     int free_args[MAXARGS];  // Arguments that must be freed
     char *input_file;
     char *output_file;
-    int bg;  // 1 if process should run in background, else 0
+    int bg;  // 1 if process should run in background, else 0 (Only applicable for non-built-in commands)
 };
 
 /** 
@@ -130,45 +131,6 @@ void get_input(char *user_input, struct command_line *command) {
 }
 
 /** 
- * TODO: Fill out
- * 
- * 
- */
-int process_built_ins(struct command_line *command, int *stop) {
-    // exit
-    if (!strcmp(command->command, "exit")) {
-        *stop = 1;
-        return 1;
-    }
-    // cd
-    else if (!strcmp(command->command, "cd")) {
-        // No arguments: cd to home directory
-        if (command->args[1] == NULL) {
-            if (chdir(getenv("HOME")) != 0) {
-                fprintf(stderr, "Unable to cd to home directory\n");
-                fflush(stdout);
-            }
-        }
-        // One argument: cd to specified directory
-        else {
-            if (chdir(command->args[1]) != 0) {
-                fprintf(stderr, "Unable to cd to %s\n", command->args[1]);
-                fflush(stdout);
-            }
-        }
-        return 1;
-    }
-    // status
-    else if (!strcmp(command->command, "status")) {
-        // TODO: Implement status command
-        return 1;
-    }
-    else {
-        return 0;
-    }
-}
-
-/** 
  * Redirect stdin and stdout.
  * 
  * @param command The command_line structure to store user input
@@ -211,6 +173,70 @@ void IO_redirection(struct command_line *command) {
 }
 
 /** 
+ * Check if an array of non-zero integers is full.
+ * 
+ * Array elements are specified as non-zero because 0 is used to indicate an empty spot in the array.
+ * 
+ * @param arr Array to check
+ * @param n Number of elements in array
+ * @return 1 if array is full, else 0
+ */
+int space_check_arr(int *arr, int n) {
+    for (int i = 0; i < n; i++) {
+        if (arr[i] == 0) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/** 
+ * Add a child PID to an array of background processes.
+ * 
+ * @param bg_processes Array of background processes
+ * @param pid Child PID to add
+ */
+void add_bg_process(int *bg_processes, int pid) {
+    for (int i = 0; i < MAXBGPROCS; i++) {
+        if (bg_processes[i] == 0) {
+            bg_processes[i] = pid;
+            return;
+        }
+    }
+}
+
+/** 
+ * Remove a child PID from an array of background processes.
+ * 
+ * @param bg_processes Array of background processes
+ * @param i Index of child PID to remove
+ */
+void remove_bg_process(int *bg_processes, int i) {
+    bg_processes[i] = 0;
+}
+
+/** 
+ * Reap potential zombies from an array of background processes.
+ * 
+ * @param bg_processes Array of background processes
+ */
+void reap_processes(int *bg_processes) {
+    int child_status;
+    pid_t child_pid;
+    for (int i = 0; i < MAXBGPROCS; i++) {
+        if (bg_processes[i] != 0) {
+            child_pid = waitpid(bg_processes[i], &child_status, WNOHANG);
+            if (child_pid != 0) {
+                // Child with PID of bg_processes[i] has completed running
+                remove_bg_process(bg_processes, i);
+                printf("Background process with PID %d has completed running: exit value %d\n", child_pid, child_status);
+                fflush(stdout);
+            }
+        }
+    }
+}
+
+/** 
  * Perform clean-up after each prompt cycle.
  * 
  * @param user_input User input
@@ -224,9 +250,117 @@ void clean_up(char *user_input, struct command_line *command) {
     }
 }
 
+/** 
+ * Process built-in commands
+ *
+ * @param command The command_line structure to store user input
+ * @param stop Stop flag to exit program
+ * @param fg_status Most recent foreground process status
+ * @return 0 if built-in command was run, else 1 (command is not a build-in command)
+ */
+int process_built_ins(struct command_line *command, int *stop, int *fg_status) {
+    // exit
+    if (!strcmp(command->command, "exit")) {
+        *stop = 1;
+        return 0;
+    }
+    // cd
+    else if (!strcmp(command->command, "cd")) {
+        // No arguments: cd to home directory
+        if (command->args[1] == NULL) {
+            if (chdir(getenv("HOME")) != 0) {
+                fprintf(stderr, "Unable to cd to home directory\n");
+                fflush(stdout);
+            }
+        }
+        // One argument: cd to specified directory
+        else {
+            if (chdir(command->args[1]) != 0) {
+                fprintf(stderr, "Unable to cd to %s\n", command->args[1]);
+                fflush(stdout);
+            }
+        }
+        return 0;
+    }
+    // status
+    else if (!strcmp(command->command, "status")) {
+        printf("Exit value %d\n", *fg_status);
+        fflush(stdout);
+        return 0;
+    }
+    else {
+        return 1;
+    }
+}
+
+/** 
+ * Execute non-built-in commands.
+ * 
+ * @param command The command_line structure to store user input
+ * @param bg_processes Array of background processes
+ */
+void exec_cmd(struct command_line *command, int *bg_processes, int *fg_status) {
+    if (command->bg == 1) {
+        // Check and return if too many background processes are running
+        if (space_check_arr(bg_processes, MAXBGPROCS)) {
+            fprintf(stderr, "Error adding background process: too many processes are running\n");
+            fflush(stdout);
+            return;
+        }
+    }
+
+    int child_status;
+    pid_t child_pid = fork();
+    switch(child_pid) {
+        case -1:
+                fprintf(stderr, "Error forking\n");
+                fflush(stdout);
+                exit(1);
+                break;
+        case 0:
+                // Redirect background process I/O to /dev/null if unspecified
+                if (command->bg == 1) {
+                    if (command->input_file == NULL) {
+                        command->input_file = "/dev/null";
+                    }
+                    if (command->output_file == NULL) {
+                        command->output_file = "/dev/null";
+                    }
+                }
+                // Child executes command
+                IO_redirection(command);
+                execvp(command->command, command->args);
+                fprintf(stderr, "Error executing command\n");
+                fflush(stdout);
+                exit(1);
+                break;
+        default:
+                // Process to be run in the background
+                if (command->bg == 1) {
+                    add_bg_process(bg_processes, child_pid);
+                    waitpid(child_pid, &child_status, WNOHANG);
+                    printf("Background process with PID %d is running\n", child_pid);
+                    fflush(stdout);
+                }
+                // Process to be run in the foreground
+                else {
+                    child_pid = waitpid(child_pid, &child_status, 0);
+                    if (WIFEXITED(child_status)) {
+                        *fg_status = WEXITSTATUS(child_status);
+                    }
+                }
+                break;
+    }
+}
+
 int main() {
     int stop = 0;
+    int fg_status = 0;  // Most recent foreground process status
+    int bg_processes[MAXBGPROCS] = {0};  // Background processes that must be reaped
+
     while (stop == 0) {
+        reap_processes(bg_processes);
+
         // Prompt
         printf(": ");
         fflush(stdout);
@@ -241,32 +375,12 @@ int main() {
         }
 
         // Process commands
-        if (!process_built_ins(&command, &stop)) {  // Process built-in commands
-            // Execute other commands
-            int child_status;
-            pid_t child_pid = fork();
-
-            switch(child_pid) {
-                case -1:
-                        fprintf(stderr, "Error forking\n");
-                        fflush(stdout);
-                        exit(1);
-                        break;
-                case 0:
-                        // Child executes command
-                        IO_redirection(&command);
-                        execvp(command.command, command.args);
-                        fprintf(stderr, "Error executing command\n");
-                        fflush(stdout);
-                        exit(1);
-                        break;
-                default:
-                        // Parent waits for child to finish executing command
-                        child_pid = waitpid(child_pid, &child_status, 0);
-                        break;
-            }
+        if (process_built_ins(&command, &stop, &fg_status)) {  // Process built-in commands
+            exec_cmd(&command, bg_processes, &fg_status);  // Execute other commands
         }
+
         clean_up(user_input, &command);
     }
+    // TODO: Terminate all processes
     return 0;
 }
