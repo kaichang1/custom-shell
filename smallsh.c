@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
 
@@ -129,6 +130,87 @@ void get_input(char *user_input, struct command_line *command) {
 }
 
 /** 
+ * TODO: Fill out
+ * 
+ * 
+ */
+int process_built_ins(struct command_line *command, int *stop) {
+    // exit
+    if (!strcmp(command->command, "exit")) {
+        *stop = 1;
+        return 1;
+    }
+    // cd
+    else if (!strcmp(command->command, "cd")) {
+        // No arguments: cd to home directory
+        if (command->args[1] == NULL) {
+            if (chdir(getenv("HOME")) != 0) {
+                fprintf(stderr, "Unable to cd to home directory\n");
+                fflush(stdout);
+            }
+        }
+        // One argument: cd to specified directory
+        else {
+            if (chdir(command->args[1]) != 0) {
+                fprintf(stderr, "Unable to cd to %s\n", command->args[1]);
+                fflush(stdout);
+            }
+        }
+        return 1;
+    }
+    // status
+    else if (!strcmp(command->command, "status")) {
+        // TODO: Implement status command
+        return 1;
+    }
+    else {
+        return 0;
+    }
+}
+
+/** 
+ * Redirect stdin and stdout.
+ * 
+ * @param command The command_line structure to store user input
+ */
+void IO_redirection(struct command_line *command) {
+    // Output redirection
+    if (command->output_file != NULL) {
+        // Open output file
+        int target_fd = open(command->output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (target_fd == -1) {
+            fprintf(stderr, "Error opening output file\n");
+            fflush(stdout);
+            exit(1);
+        }
+        // Redirect stdout to output file
+        int ret = dup2(target_fd, 1);
+        if (ret == -1) {
+            fprintf(stderr, "Error redirecting stdout\n");
+            fflush(stdout);
+            exit(1);
+        }
+    }
+    // Input redirection
+    if (command->input_file != NULL) {
+        // Open input file
+        int source_fd = open(command->input_file, O_RDONLY);
+        if (source_fd == -1) {
+            fprintf(stderr, "Error opening input file\n");
+            fflush(stdout);
+            exit(1);
+        }
+        // Redirect stdin to input file
+        int ret = dup2(source_fd, 0);
+        if (ret == -1) {
+            fprintf(stderr, "Error redirecting stdin\n");
+            fflush(stdout);
+            exit(1);
+        }
+    }
+}
+
+/** 
  * Perform clean-up after each prompt cycle.
  * 
  * @param user_input User input
@@ -144,7 +226,6 @@ void clean_up(char *user_input, struct command_line *command) {
 
 int main() {
     int stop = 0;
-
     while (stop == 0) {
         // Prompt
         printf(": ");
@@ -157,6 +238,33 @@ int main() {
         // Ignore comments and empty commands
         if (command.command == NULL) {
             continue;
+        }
+
+        // Process commands
+        if (!process_built_ins(&command, &stop)) {  // Process built-in commands
+            // Execute other commands
+            int child_status;
+            pid_t child_pid = fork();
+
+            switch(child_pid) {
+                case -1:
+                        fprintf(stderr, "Error forking\n");
+                        fflush(stdout);
+                        exit(1);
+                        break;
+                case 0:
+                        // Child executes command
+                        IO_redirection(&command);
+                        execvp(command.command, command.args);
+                        fprintf(stderr, "Error executing command\n");
+                        fflush(stdout);
+                        exit(1);
+                        break;
+                default:
+                        // Parent waits for child to finish executing command
+                        child_pid = waitpid(child_pid, &child_status, 0);
+                        break;
+            }
         }
         clean_up(user_input, &command);
     }
