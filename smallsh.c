@@ -295,14 +295,12 @@ void IO_redirection(struct command_line *command) {
         int target_fd = open(command->output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (target_fd == -1) {
             fprintf(stderr, "Error opening output file\n");
-            fflush(stdout);
             exit(1);
         }
         // Redirect stdout to output file
         int ret = dup2(target_fd, 1);
         if (ret == -1) {
             fprintf(stderr, "Error redirecting stdout\n");
-            fflush(stdout);
             exit(1);
         }
     }
@@ -312,14 +310,12 @@ void IO_redirection(struct command_line *command) {
         int source_fd = open(command->input_file, O_RDONLY);
         if (source_fd == -1) {
             fprintf(stderr, "Error opening input file\n");
-            fflush(stdout);
             exit(1);
         }
         // Redirect stdin to input file
         int ret = dup2(source_fd, 0);
         if (ret == -1) {
             fprintf(stderr, "Error redirecting stdin\n");
-            fflush(stdout);
             exit(1);
         }
     }
@@ -350,14 +346,12 @@ int process_built_ins(struct command_line *command, int *stop, int *fg_status) {
         if (command->args[1] == NULL) {
             if (chdir(getenv("HOME")) != 0) {
                 fprintf(stderr, "Unable to cd to home directory\n");
-                fflush(stdout);
             }
         }
         // One argument: cd to specified directory
         else {
             if (chdir(command->args[1]) != 0) {
                 fprintf(stderr, "Unable to cd to %s\n", command->args[1]);
-                fflush(stdout);
             }
         }
         return 0;
@@ -400,7 +394,6 @@ void exec_cmd(struct command_line *command, int *bg_processes,
         // Check and return if too many background processes are running
         if (space_check_arr(bg_processes, MAXBGPROCS)) {
             fprintf(stderr, "Error adding background process: too many processes are running\n");
-            fflush(stdout);
             return;
         }
     }
@@ -412,7 +405,6 @@ void exec_cmd(struct command_line *command, int *bg_processes,
     switch(child_pid) {
         case -1:
                 fprintf(stderr, "Error forking\n");
-                fflush(stdout);
                 exit(1);
                 break;
         case 0:
@@ -435,7 +427,6 @@ void exec_cmd(struct command_line *command, int *bg_processes,
                 IO_redirection(command);
                 execvp(command->command, command->args);
                 fprintf(stderr, "Error executing command\n");
-                fflush(stdout);
                 exit(1);
                 break;
         default:
