@@ -74,3 +74,7 @@ These commands are run in foreground-only mode.
 ### Executing the Program
 
 ```./smallsh```
+
+## Sample Run
+
+![Sample Run](./images/smallsh_ex_run.JPG)
