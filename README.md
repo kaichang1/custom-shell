@@ -65,7 +65,7 @@ These commands are run in foreground-only mode.
 
 ### Dependencies
 
-- Linux
+- GCC compiler
 
 ### Installation
 
