@@ -2,7 +2,7 @@
 
 Custom shell that implements many features present in other shells such as bash.
 
-## Shell Description & Functionality:
+## Shell Description & Functionality
 
 ### Command Prompt
 
